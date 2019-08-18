@@ -19,6 +19,9 @@ let really_read fd len =
   done;
   Bytes.to_string buffer
 
+let start_motor t = really_write t.fd "\xa5\xf0\x02\x94\x02\xc1"
+let stop_motor t = really_write t.fd "\xa5\xf0\x02\x00\x00W"
+
 let create ?(baudrate = 115200) device_name =
   let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_CLOEXEC ] 0 in
   let tc = Unix.tcgetattr fd in
@@ -45,8 +48,9 @@ let create ?(baudrate = 115200) device_name =
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_rts;
   Unix.tcflush fd TCIFLUSH;
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
-  really_write fd "\xa5\xf0\x02\x94\x02\xc1";
-  { fd }
+  let t = { fd } in
+  start_motor t;
+  t
 
 module Descriptor = struct
   type t =
@@ -127,10 +131,14 @@ module Health = struct
     | code -> Printf.failwithf "unexpected health status %d" code ()
 end
 
-let stop t = send_command t `stop
+let stop t =
+  send_command t `stop;
+  stop_motor t;
+  Unix.tcflush t.fd TCIFLUSH
 
-let reset t =
+let reset ?(restart_motor = false) t =
   send_command t `reset;
+  if restart_motor then start_motor t;
   Unix.tcflush t.fd TCIFLUSH
 
 module Scan = struct

@@ -3,9 +3,9 @@ open! Rplidar
 
 let () =
   let lidar = Lidar.create "/dev/ttyUSB0" in
-  Stdio.printf "Lidar initialized!\n%!";
+  Stdio.eprintf "Lidar initialized!\n%!";
   let info = Lidar.Info.get lidar in
-  Stdio.printf
+  Stdio.eprintf
     "Model: %d, Firmware: %d,%d, Hardware: %d\n%!"
     info.model
     (fst info.firmware)
@@ -17,8 +17,9 @@ let () =
     | Warning err -> Printf.sprintf "warning %d" err
     | Error err -> Printf.sprintf "error %d" err
   in
-  Stdio.printf "Health: %s\n%!" health;
+  Stdio.eprintf "Health: %s\n%!" health;
   let cnt = ref 0 in
+  Stdio.printf "quality,angle,dist\n%!";
   Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
       Stdio.printf "%d,%f,%f\n%!" quality angle dist;
       Int.incr cnt;

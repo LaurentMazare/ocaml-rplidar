@@ -2,7 +2,7 @@ type t
 
 val create : ?baudrate:int -> string -> t
 val stop : t -> unit
-val reset : t -> unit
+val reset : ?restart_motor:bool -> t -> unit
 val close : t -> unit
 
 module Info : sig
