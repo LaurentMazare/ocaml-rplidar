@@ -3,7 +3,7 @@ open Base
 type t = { fd : Unix.file_descr }
 
 let create ?(baudrate = 115200) device_name =
-  let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_NONBLOCK; O_CLOEXEC ] 0 in
+  let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_CLOEXEC ] 0 in
   let tc = Unix.tcgetattr fd in
   let tc =
     { tc with
@@ -29,7 +29,6 @@ let create ?(baudrate = 115200) device_name =
   Unix.tcflush fd TCIFLUSH;
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
   ignore (Unix.write_substring fd "\xa5\xf0\x02\x94\x02\xc1" 0 6);
-  ignore (Unix.select [] [ fd ] [] (-1.));
   { fd }
 
 module Descriptor = struct
@@ -40,7 +39,6 @@ module Descriptor = struct
     }
 
   let read fd =
-    ignore (Unix.select [ fd ] [] [] (-1.));
     let descriptor = Bytes.create 7 in
     ignore (Unix.read fd descriptor 0 7);
     let descriptor = Bytes.to_string descriptor in
@@ -65,8 +63,7 @@ let send_command t command =
     match command with
     | `get_info -> "\xA5\x50"
   in
-  ignore (Unix.write_substring t.fd command 0 2);
-  ignore (Unix.select [] [ t.fd ] [] (-1.))
+  ignore (Unix.write_substring t.fd command 0 2)
 
 module Info = struct
   type lidar = t
