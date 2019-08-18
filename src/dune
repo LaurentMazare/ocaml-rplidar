@@ -1,0 +1,6 @@
+(library
+  (name rplidar)
+  (public_name rplidar)
+  (libraries base stdio unix)
+  (flags :standard -w -66)
+)
