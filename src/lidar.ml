@@ -76,6 +76,11 @@ let send_command t command =
   let command =
     match command with
     | `get_info -> "\xA5\x50"
+    | `get_health -> "\xA5\x52"
+    | `scan -> "\xA5\x20"
+    | `force_scan -> "\xA5\x21"
+    | `stop -> "\xA5\x25"
+    | `reset -> "\xA5\x40"
   in
   really_write t.fd command
 
@@ -98,6 +103,64 @@ module Info = struct
     ; firmware = Char.to_int info.[2], Char.to_int info.[1]
     ; hardware = Char.to_int info.[3]
     }
+end
+
+module Health = struct
+  type lidar = t
+
+  type t =
+    | Good
+    | Warning of int
+    | Error of int
+
+  let get t =
+    send_command t `get_health;
+    let descriptor = Descriptor.read t.fd in
+    if descriptor.size <> 3
+    then Printf.failwithf "unexpected health size %d" descriptor.size ();
+    let health = really_read t.fd descriptor.size in
+    let error_code = (Char.to_int health.[1] * 256) + Char.to_int health.[2] in
+    match Char.to_int health.[0] with
+    | 0 -> Good
+    | 1 -> Warning error_code
+    | 2 -> Error error_code
+    | code -> Printf.failwithf "unexpected health status %d" code ()
+end
+
+let stop t = send_command t `stop
+
+let reset t =
+  send_command t `reset;
+  Unix.tcflush t.fd TCIFLUSH
+
+module Scan = struct
+  type lidar = t
+
+  type t =
+    { quality : int
+    ; angle : float
+    ; dist : float
+    }
+
+  let run t ~f =
+    send_command t `scan;
+    let descriptor = Descriptor.read t.fd in
+    if descriptor.size <> 5
+    then Printf.failwithf "unexpected scan size %d" descriptor.size ();
+    if descriptor.is_single then failwith "scan does not return a stream of answers";
+    let rec loop () =
+      let s = really_read t.fd descriptor.size in
+      let quality = Char.to_int s.[0] lsr 2 in
+      let angle = (Char.to_int s.[1] lsr 1) + (Char.to_int s.[2] lsl 7) in
+      let angle = Float.of_int angle /. 64. in
+      let dist = Char.to_int s.[3] + (Char.to_int s.[4] lsl 8) in
+      let dist = Float.of_int dist /. 4. in
+      match f { quality; angle; dist } with
+      | `continue -> loop ()
+      | `break -> ()
+    in
+    loop ();
+    reset t
 end
 
 let close t = Unix.close t.fd

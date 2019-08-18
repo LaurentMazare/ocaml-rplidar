@@ -11,4 +11,16 @@ let () =
     (fst info.firmware)
     (snd info.firmware)
     info.hardware;
+  let health =
+    match Lidar.Health.get lidar with
+    | Good -> "good"
+    | Warning err -> Printf.sprintf "warning %d" err
+    | Error err -> Printf.sprintf "error %d" err
+  in
+  Stdio.printf "Health: %s\n%!" health;
+  let cnt = ref 0 in
+  Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
+      Stdio.printf "%d,%f,%f\n%!" quality angle dist;
+      Int.incr cnt;
+      if !cnt >= 10_000 then `break else `continue);
   Lidar.close lidar
