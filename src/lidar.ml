@@ -8,7 +8,7 @@ type t =
   }
 
 let create ?(baudrate = 115200) device_name =
-  let fd = Unix.openfile device_name [ O_RDWR ] 0 in
+  let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_NONBLOCK; O_CLOEXEC ] 0 in
   let in_channel = Unix.in_channel_of_descr fd in
   let out_channel = Unix.out_channel_of_descr fd in
   let tc = Unix.tcgetattr fd in
@@ -16,7 +16,12 @@ let create ?(baudrate = 115200) device_name =
     { tc with c_ibaud = baudrate; c_obaud = baudrate; c_parenb = false; c_cstopb = 1 }
   in
   Unix.tcsetattr fd TCSANOW tc;
+  Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_dtr;
+  Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_rts;
   Unix.tcflush fd TCIFLUSH;
+  Ioctl_bindings.ioctl fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
+  Out_channel.output_string out_channel "\xa5\xf0\x02\x94\x02\xc1";
+  Out_channel.flush out_channel;
   { in_channel; out_channel; fd }
 
 module Descriptor = struct
