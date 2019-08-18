@@ -2,6 +2,23 @@ open Base
 
 type t = { fd : Unix.file_descr }
 
+let really_write fd str =
+  let len = String.length str in
+  let current = ref 0 in
+  while !current < len do
+    let written = Unix.write_substring fd str !current (len - !current) in
+    current := !current + written
+  done
+
+let really_read fd len =
+  let buffer = Bytes.create len in
+  let current = ref 0 in
+  while !current < len do
+    let read = Unix.read fd buffer !current (len - !current) in
+    current := !current + read
+  done;
+  Bytes.to_string buffer
+
 let create ?(baudrate = 115200) device_name =
   let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_CLOEXEC ] 0 in
   let tc = Unix.tcgetattr fd in
@@ -28,7 +45,7 @@ let create ?(baudrate = 115200) device_name =
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_rts;
   Unix.tcflush fd TCIFLUSH;
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
-  ignore (Unix.write_substring fd "\xa5\xf0\x02\x94\x02\xc1" 0 6);
+  really_write fd "\xa5\xf0\x02\x94\x02\xc1";
   { fd }
 
 module Descriptor = struct
@@ -39,10 +56,7 @@ module Descriptor = struct
     }
 
   let read fd =
-    let descriptor = Bytes.create 7 in
-    ignore (Unix.read fd descriptor 0 7);
-    let descriptor = Bytes.to_string descriptor in
-    if String.length descriptor <> 7 then failwith "unexpected descriptor size";
+    let descriptor = really_read fd 7 in
     if Char.( <> ) descriptor.[0] '\xA5' || Char.( <> ) descriptor.[1] '\x5A'
     then failwith "incorrect descriptor sync bytes";
     let type_ =
@@ -63,7 +77,7 @@ let send_command t command =
     match command with
     | `get_info -> "\xA5\x50"
   in
-  ignore (Unix.write_substring t.fd command 0 2)
+  really_write t.fd command
 
 module Info = struct
   type lidar = t
@@ -79,9 +93,7 @@ module Info = struct
     let descriptor = Descriptor.read t.fd in
     if descriptor.size <> 20
     then Printf.failwithf "unexpected info size %d" descriptor.size ();
-    let info = Bytes.create 20 in
-    ignore (Unix.read t.fd info 0 20);
-    let info = Bytes.to_string info in
+    let info = really_read t.fd descriptor.size in
     { model = Char.to_int info.[0]
     ; firmware = Char.to_int info.[2], Char.to_int info.[1]
     ; hardware = Char.to_int info.[3]
