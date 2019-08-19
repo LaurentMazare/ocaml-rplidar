@@ -19,8 +19,13 @@ let really_read fd len =
   done;
   Bytes.to_string buffer
 
-let start_motor t = really_write t.fd "\xa5\xf0\x02\x94\x02\xc1"
-let stop_motor t = really_write t.fd "\xa5\xf0\x02\x00\x00W"
+let start_motor t =
+  Ioctl_bindings.ioctl t.fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
+  really_write t.fd "\xa5\xf0\x02\x94\x02\xc1"
+
+let stop_motor t =
+  really_write t.fd "\xa5\xf0\x02\x00\x00W";
+  Ioctl_bindings.ioctl t.fd ~cmd:`tiocmbis ~arg:`tiocm_dtr
 
 let create ?(baudrate = 115200) device_name =
   let fd = Unix.openfile device_name [ O_RDWR; O_NOCTTY; O_CLOEXEC ] 0 in
@@ -47,7 +52,6 @@ let create ?(baudrate = 115200) device_name =
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_dtr;
   Ioctl_bindings.ioctl fd ~cmd:`tiocmbis ~arg:`tiocm_rts;
   Unix.tcflush fd TCIFLUSH;
-  Ioctl_bindings.ioctl fd ~cmd:`tiocmbic ~arg:`tiocm_dtr;
   let t = { fd } in
   start_motor t;
   t
