@@ -1,15 +1,16 @@
-open! Base
-open! Rplidar
+open Base
+open Rplidar
 
 let () =
   let lidar = Lidar.create "/dev/ttyUSB0" in
   Stdio.eprintf "Lidar initialized!\n%!";
   let info = Lidar.Info.get lidar in
+  let firmware1, firmware2 = info.firmware in
   Stdio.eprintf
-    "Model: %d, Firmware: %d,%d, Hardware: %d\n%!"
+    "Model: %d, Firmware: %d,%d, Hardware: %d.\n%!"
     info.model
-    (fst info.firmware)
-    (snd info.firmware)
+    firmware1
+    firmware2
     info.hardware;
   let health =
     match Lidar.Health.get lidar with
@@ -17,7 +18,7 @@ let () =
     | Warning err -> Printf.sprintf "warning %d" err
     | Error err -> Printf.sprintf "error %d" err
   in
-  Stdio.eprintf "Health: %s\n%!" health;
+  Stdio.eprintf "Lidar health: %s\n%!" health;
   let cnt = ref 0 in
   Stdio.printf "quality,angle,dist\n%!";
   Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
