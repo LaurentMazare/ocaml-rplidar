@@ -1,7 +1,7 @@
 (library
   (name rplidar)
   (public_name rplidar)
-  (libraries base stdio unix)
+  (libraries base bigarray stdio unix)
   (c_names ml_ioctl)
   (c_library_flags :standard)
   (flags :standard -w -66)
