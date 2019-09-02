@@ -1,6 +1,8 @@
 open Base
 open Rplidar
 
+let csv_filename = "/tmp/dists.csv"
+
 let () =
   let lidar = Lidar.create "/dev/ttyUSB0" in
   Stdio.eprintf "Lidar initialized!\n%!";
@@ -18,11 +20,12 @@ let () =
     | Warning err -> Printf.sprintf "warning %d" err
     | Error err -> Printf.sprintf "error %d" err
   in
-  Stdio.eprintf "Lidar health: %s\n%!" health;
-  let cnt = ref 0 in
-  Stdio.printf "quality,angle,dist\n%!";
-  Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
-      Stdio.printf "%d,%f,%f\n%!" quality angle dist;
-      Int.incr cnt;
-      if !cnt >= 10_000 then `break else `continue);
+  Stdio.printf "Lidar health: %s\n%!" health;
+  Stdio.Out_channel.with_file csv_filename ~f:(fun out_channel ->
+      let cnt = ref 0 in
+      Stdio.Out_channel.fprintf out_channel "quality,angle,dist\n%!";
+      Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
+          Stdio.Out_channel.fprintf out_channel "%d,%f,%f\n%!" quality angle dist;
+          Int.incr cnt;
+          if !cnt >= 10_000 then `break else `continue));
   Lidar.close lidar

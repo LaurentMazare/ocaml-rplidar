@@ -1,5 +1,8 @@
 type t
 
+(** [create ?baudrate filename] creates a new Lidar sensor based on
+    device [filename], usually /dev/ttyUSB0.
+*)
 val create : ?baudrate:int -> string -> t
 val stop : t -> unit
 val reset : ?restart_motor:bool -> t -> unit
@@ -31,9 +34,9 @@ module Scan : sig
   type lidar = t
 
   type t =
-    { quality : int
-    ; angle : float
-    ; dist : float
+    { quality : int (** The returned quality ranges from 0 to 15. *)
+    ; angle : float (** The measurement angle, in degrees. *)
+    ; dist : float (* The measured distance, in millimeters. *)
     }
 
   val run : lidar -> f:(t -> [ `continue | `break ]) -> unit
