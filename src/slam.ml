@@ -10,6 +10,42 @@ module Position = struct
     }
 end
 
+module Angle_distance = struct
+  type t =
+    { angle : float
+    ; distance : int
+    }
+end
+
+module Interpolation = struct
+  type t =
+    { angle_distance_pairs : Angle_distance.t array
+    ; angles : float array
+    ; distances : float array
+    }
+end
+
+module Scan = struct
+  type coordinates_and_value =
+    { x_mm : float
+    ; y_mm : float
+    ; value : int
+    }
+
+  type t =
+    { xyv : coordinates_and_value
+    ; mutable npoints : int
+    ; span : int
+    ; size : int
+    ; rate_hz : float
+    ; detection_angle_degrees : float
+    ; distance_no_detection_mm : float
+    ; detection_margin : int
+    ; offset_mm : float
+    ; interpolation : Interpolation.t
+    }
+end
+
 module Map_ = struct
   type pixels = (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array2.t
 
