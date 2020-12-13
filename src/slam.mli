@@ -15,9 +15,19 @@ module Angle_distance : sig
     }
 end
 
-module Scan : sig
-  type t
-  type coordinates_and_value
+module Scan_point : sig
+  type t =
+    { x_mm : float
+    ; y_mm : float
+    ; value : int
+    }
+end
+
+module Pixel : sig
+  type t =
+    { xp : int
+    ; yp : int
+    }
 end
 
 module Map : sig
@@ -26,9 +36,9 @@ end
 
 type t
 
-val create : map_size_in_pixels:int -> map_size_in_meters:float -> t
+val create : map_size_pixel:int -> map_size_mm:float -> t
 val current_position : t -> Position.t
-val update : t -> Angle_distance.t list -> unit
+val update : t -> Angle_distance.t list -> Pixel.t list
 
 val map_memory
   :  t

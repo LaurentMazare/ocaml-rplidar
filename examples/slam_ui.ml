@@ -1,8 +1,17 @@
 open Base
 open Rplidar
 
-let map_size_in_pixels = 1024
-let map_size_in_meters = 6000.
+let map_size_pixel = 512
+let map_size_mm = 6000.
+
+module Sample = struct
+  (* TODO: also log the time for the sample? *)
+  type t =
+    { degrees : float
+    ; mm : float
+    }
+  [@@deriving sexp]
+end
 
 module G = struct
   type t =
@@ -22,20 +31,25 @@ module G = struct
 
   let close _t = Graphics.close_graph ()
 
-  let update t =
+  let update t ~scan_points =
+    Graphics.set_color Graphics.white;
+    Graphics.fill_rect 0 0 map_size_pixel map_size_pixel;
     (* TODO: efficient plotting. *)
-    for i = 0 to map_size_in_pixels - 1 do
-      for j = 0 to map_size_in_pixels - 1 do
-        let v = t.map_memory.{i, j} in
+    for i = 0 to map_size_pixel - 1 do
+      for j = 0 to map_size_pixel - 1 do
+        (* The value is encoded between 0 and ~2**16 *)
+        let v = t.map_memory.{i, j} / 256 in
         Graphics.set_color (Graphics.rgb v v v);
         Graphics.plot i j
       done
     done;
+    Graphics.set_color Graphics.blue;
+    List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } -> Graphics.plot yp xp);
     Graphics.synchronize ()
 end
 
-let () =
-  let slam = Slam.create ~map_size_in_pixels ~map_size_in_meters in
+let run ~out_channel =
+  let slam = Slam.create ~map_size_pixel ~map_size_mm in
   let g = G.create slam in
   let lidar = Lidar.create "/dev/ttyUSB0" in
   Stdio.eprintf "Lidar initialized!\n%!";
@@ -61,22 +75,41 @@ let () =
          Stdio.eprintf "caught signal %d, exiting\n%!" id;
          Lidar.stop lidar;
          Lidar.close lidar;
+         Stdio.Out_channel.flush out_channel;
          G.close g;
          Caml.exit 1));
-  let last_angle = ref 0. in
-  let batch = ref [] in
-  Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
-      (* TODO: type-safe way to handle the zero distance? *)
-      if quality > 0
-      then
-        batch
-          := { Slam.Angle_distance.angle_degrees = angle; distance_mm = dist } :: !batch;
-      if Float.( < ) angle !last_angle
-      then
-        if not (List.is_empty !batch)
+  try
+    let last_angle = ref 0. in
+    let batch = ref [] in
+    Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
+        (* TODO: type-safe way to handle the zero distance? *)
+        if quality > 0
         then (
-          Slam.update slam !batch;
-          batch := [];
-          G.update g);
-      last_angle := angle;
-      `continue)
+          let sample = { Sample.degrees = angle; mm = dist } |> Sample.sexp_of_t in
+          Stdio.Out_channel.fprintf out_channel "%s\n" (Sexp.to_string_mach sample);
+          batch
+            := { Slam.Angle_distance.angle_degrees = angle; distance_mm = dist } :: !batch);
+        if List.length !batch > 200
+        then
+          if not (List.is_empty !batch)
+          then (
+            let scan_points = Slam.update slam !batch in
+            batch := [];
+            G.update g ~scan_points);
+        last_angle := angle;
+        `continue)
+  with
+  | exn ->
+    Lidar.stop lidar;
+    Lidar.close lidar;
+    G.close g;
+    raise exn
+
+let () =
+  match Caml.Sys.argv with
+  | [| _; "record"; filename |] ->
+    Stdio.Out_channel.with_file filename ~f:(fun out_channel -> run ~out_channel)
+  | [| _; "replay"; _filename |] -> failwith "not implemented yet"
+  | argv ->
+    Stdio.eprintf "usage: %s {record,replay} logfile.sexp" argv.(0);
+    Caml.exit 1

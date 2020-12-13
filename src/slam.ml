@@ -32,32 +32,18 @@ module Angle_distance = struct
     }
 end
 
-module Interpolation = struct
+module Scan_point = struct
   type t =
-    { angle_distance_pairs : Angle_distance.t array
-    ; angles : float array
-    ; distances : float array
-    }
-end
-
-module Scan = struct
-  type coordinates_and_value =
     { x_mm : float
     ; y_mm : float
     ; value : int
     }
+end
 
+module Pixel = struct
   type t =
-    { xyv : coordinates_and_value
-    ; mutable npoints : int
-    ; span : int
-    ; size : int
-    ; rate_hz : float
-    ; detection_angle_degrees : float
-    ; distance_no_detection_mm : float
-    ; detection_margin : int
-    ; offset_mm : float
-    ; interpolation : Interpolation.t
+    { xp : int
+    ; yp : int
     }
 end
 
@@ -66,26 +52,26 @@ module Map = struct
 
   type t =
     { pixels : pixels
-    ; size_meters : float
-    ; size_pixels : int
+    ; size_mm : float
+    ; size_pixel : int
     ; scale_pixels_per_mm : float
     }
 
-  let create ~size_pixels ~size_meters =
+  let create ~size_pixel ~size_mm =
     let pixels =
-      Bigarray.Array1.create Int16_unsigned C_layout (size_pixels * size_pixels)
+      Bigarray.Array1.create Int16_unsigned C_layout (size_pixel * size_pixel)
     in
     Bigarray.Array1.fill pixels ((obstacle + no_obstacle) / 2);
     { pixels
-    ; size_meters
-    ; size_pixels
-    ; scale_pixels_per_mm = Float.of_int size_pixels /. (size_meters *. 1e3)
+    ; size_mm
+    ; size_pixel
+    ; scale_pixels_per_mm = Float.of_int size_pixel /. size_mm
     }
 
   let round f = Float.round_down (f +. 0.5) |> Int.of_float
 
   let clip t ~xyc ~yxc ~xy ~yx =
-    let sz = t.size_pixels in
+    let sz = t.size_pixel in
     if xyc < 0
     then if xyc = xy then None else Some (0, yxc + ((yxc - yx) * -xyc / (xyc - xy)))
     else if xyc >= sz
@@ -95,8 +81,10 @@ module Map = struct
       else Some (sz - 1, yxc + ((yxc - yx) * (sz - 1 - xyc) / (xyc - xy)))
     else Some (xyc, yxc)
 
+  exception No_error_gradient
+
   let laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha =
-    let map_size = t.size_pixels in
+    let map_size = t.size_pixel in
     if 0 <= x1 && x1 < map_size && 0 <= x2 && x2 < map_size
     then (
       let x2c, y2c = x2, y2 in
@@ -121,8 +109,7 @@ module Map = struct
           let dx, _dy = maybe_flip dx dy in
           let dxc, dyc = maybe_flip dxc dyc in
           let incptrx, incptry = maybe_flip incptrx incptry in
-          if derrorv = 0
-          then failwith "map_update: no error gradient, try increasing the hole width";
+          if derrorv = 0 then raise No_error_gradient;
           let error = ref ((2 * dyc) - dxc) in
           let horiz = 2 * dyc in
           let diago = 2 * (dyc - dxc) in
@@ -156,13 +143,13 @@ module Map = struct
             index := !index + incptrx
           done))
 
-  let update t (pos : Position.t) (xyvs : Scan.coordinates_and_value list) =
+  let update t (pos : Position.t) (xyvs : Scan_point.t list) =
     let theta_radians = Position.theta_radians pos in
     let cos_theta = Float.cos theta_radians in
     let sin_theta = Float.sin theta_radians in
     let x1 = round (pos.x_mm *. t.scale_pixels_per_mm) in
     let y1 = round (pos.y_mm *. t.scale_pixels_per_mm) in
-    List.iter xyvs ~f:(fun { x_mm; y_mm; value } ->
+    List.map xyvs ~f:(fun { x_mm; y_mm; value } ->
         let x2p = (cos_theta *. x_mm) -. (sin_theta *. y_mm) in
         let y2p = (sin_theta *. x_mm) +. (cos_theta *. y_mm) in
         let xp = round ((pos.x_mm +. x2p) *. t.scale_pixels_per_mm) in
@@ -178,7 +165,9 @@ module Map = struct
           then no_obstacle, map_quality / 4
           else obstacle, map_quality
         in
-        laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha)
+        (try laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha with
+        | No_error_gradient -> ());
+        { Pixel.xp; yp })
 end
 
 type t =
@@ -186,13 +175,10 @@ type t =
   ; mutable position : Position.t
   }
 
-let create ~map_size_in_pixels ~map_size_in_meters =
-  let map = Map.create ~size_pixels:map_size_in_pixels ~size_meters:map_size_in_meters in
+let create ~map_size_pixel ~map_size_mm =
+  let map = Map.create ~size_pixel:map_size_pixel ~size_mm:map_size_mm in
   let position =
-    { Position.x_mm = map_size_in_meters *. 500.
-    ; y_mm = map_size_in_meters *. 500.
-    ; theta_degrees = 0.
-    }
+    { Position.x_mm = map_size_mm *. 0.5; y_mm = map_size_mm *. 0.5; theta_degrees = 0. }
   in
   { map; position }
 
@@ -211,10 +197,10 @@ let update t ads =
         in
         let x_mm = distance_mm *. Float.cos angle_radians in
         let y_mm = distance_mm *. Float.sin angle_radians in
-        { Scan.x_mm; y_mm; value })
+        { Scan_point.x_mm; y_mm; value })
   in
   Map.update t.map t.position xyvs
 
 let map_memory t =
   let genarray = Bigarray.genarray_of_array1 t.map.pixels in
-  Bigarray.reshape_2 genarray t.map.size_pixels t.map.size_pixels
+  Bigarray.reshape_2 genarray t.map.size_pixel t.map.size_pixel
