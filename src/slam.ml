@@ -85,7 +85,7 @@ module Map = struct
 
   let laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha =
     let map_size = t.size_pixel in
-    if 0 <= x1 && x1 < map_size && 0 <= x2 && x2 < map_size
+    if 0 <= x1 && x1 < map_size && 0 <= y1 && y1 < map_size
     then (
       let x2c, y2c = x2, y2 in
       match clip t ~xyc:x2c ~yxc:y2c ~xy:x1 ~yx:y1 with
