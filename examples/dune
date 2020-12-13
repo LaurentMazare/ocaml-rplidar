@@ -1,4 +1,11 @@
 (executables
   (names basics)
+  (modules basics)
   (libraries base rplidar stdio)
+)
+
+(executables
+  (names ui)
+  (modules ui)
+  (libraries base graphics rplidar stdio)
 )
