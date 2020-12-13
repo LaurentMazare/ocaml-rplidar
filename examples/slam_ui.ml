@@ -33,7 +33,7 @@ module G = struct
 
   let update t ~scan_points =
     Graphics.set_color Graphics.white;
-    Graphics.fill_rect 0 0 map_size_pixel map_size_pixel;
+    Graphics.fill_rect 0 0 t.size_x t.size_y;
     (* TODO: efficient plotting. *)
     for i = 0 to map_size_pixel - 1 do
       for j = 0 to map_size_pixel - 1 do
@@ -47,6 +47,21 @@ module G = struct
     List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } -> Graphics.plot yp xp);
     Graphics.synchronize ()
 end
+
+let replay ~in_channel =
+  let slam = Slam.create ~map_size_pixel ~map_size_mm in
+  let g = G.create slam in
+  let batch = ref [] in
+  Stdio.In_channel.iter_lines in_channel ~f:(fun line ->
+      let { Sample.degrees; mm } = Core_kernel.Sexp.of_string line |> Sample.t_of_sexp in
+      batch := { Slam.Angle_distance.angle_degrees = degrees; distance_mm = mm } :: !batch;
+      if List.length !batch > 200
+      then
+        if not (List.is_empty !batch)
+        then (
+          let scan_points = Slam.update slam !batch in
+          batch := [];
+          G.update g ~scan_points))
 
 let run ~out_channel =
   let slam = Slam.create ~map_size_pixel ~map_size_mm in
@@ -79,7 +94,6 @@ let run ~out_channel =
          G.close g;
          Caml.exit 1));
   try
-    let last_angle = ref 0. in
     let batch = ref [] in
     Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
         (* TODO: type-safe way to handle the zero distance? *)
@@ -96,7 +110,6 @@ let run ~out_channel =
             let scan_points = Slam.update slam !batch in
             batch := [];
             G.update g ~scan_points);
-        last_angle := angle;
         `continue)
   with
   | exn ->
@@ -109,7 +122,8 @@ let () =
   match Caml.Sys.argv with
   | [| _; "record"; filename |] ->
     Stdio.Out_channel.with_file filename ~f:(fun out_channel -> run ~out_channel)
-  | [| _; "replay"; _filename |] -> failwith "not implemented yet"
+  | [| _; "replay"; filename |] ->
+    Stdio.In_channel.with_file filename ~f:(fun in_channel -> replay ~in_channel)
   | argv ->
     Stdio.eprintf "usage: %s {record,replay} logfile.sexp" argv.(0);
     Caml.exit 1
