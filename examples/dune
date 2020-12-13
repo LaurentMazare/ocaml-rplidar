@@ -9,3 +9,9 @@
   (modules ui)
   (libraries base graphics rplidar stdio)
 )
+
+(executables
+  (names slam_ui)
+  (modules slam_ui)
+  (libraries base graphics rplidar stdio)
+)

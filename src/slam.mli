@@ -10,8 +10,8 @@ end
 
 module Angle_distance : sig
   type t =
-    { angle : float
-    ; distance : int
+    { angle_degrees : float
+    ; distance_mm : float
     }
 end
 
@@ -22,8 +22,6 @@ end
 
 module Map : sig
   type t
-
-  val update : t -> Position.t -> Scan.coordinates_and_value list -> unit
 end
 
 type t
@@ -31,3 +29,7 @@ type t
 val create : map_size_in_pixels:int -> map_size_in_meters:float -> t
 val current_position : t -> Position.t
 val update : t -> Angle_distance.t list -> unit
+
+val map_memory
+  :  t
+  -> (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array2.t

@@ -10,6 +10,7 @@ let no_obstacle = 65500
 let map_quality = 50 (* out of 255 *)
 
 let hole_width_mm = 600.
+let distance_no_detection_mm = 10_000.
 
 module Position = struct
   type t =
@@ -26,8 +27,8 @@ end
 
 module Angle_distance = struct
   type t =
-    { angle : float
-    ; distance : int
+    { angle_degrees : float
+    ; distance_mm : float
     }
 end
 
@@ -180,11 +181,40 @@ module Map = struct
         laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha)
 end
 
-type t = { map : Map.t }
+type t =
+  { map : Map.t
+  ; mutable position : Position.t
+  }
 
 let create ~map_size_in_pixels ~map_size_in_meters =
   let map = Map.create ~size_pixels:map_size_in_pixels ~size_meters:map_size_in_meters in
-  { map }
+  let position =
+    { Position.x_mm = map_size_in_meters *. 500.
+    ; y_mm = map_size_in_meters *. 500.
+    ; theta_degrees = 0.
+    }
+  in
+  { map; position }
 
-let current_position _t = failwith "TODO"
-let update _t _distance_angles = failwith "TODO"
+let current_position t = t.position
+
+let update t ads =
+  (* TODO: correct for speed/rotation of the robot and the measurements not happening
+  all at the same time. *)
+  let xyvs =
+    List.map ads ~f:(fun { Angle_distance.angle_degrees; distance_mm } ->
+        let angle_radians = angle_degrees *. Float.pi /. 180. in
+        let value, distance_mm =
+          if Float.( = ) distance_mm 0.
+          then no_obstacle, distance_no_detection_mm
+          else obstacle, distance_mm
+        in
+        let x_mm = distance_mm *. Float.cos angle_radians in
+        let y_mm = distance_mm *. Float.sin angle_radians in
+        { Scan.x_mm; y_mm; value })
+  in
+  Map.update t.map t.position xyvs
+
+let map_memory t =
+  let genarray = Bigarray.genarray_of_array1 t.map.pixels in
+  Bigarray.reshape_2 genarray t.map.size_pixels t.map.size_pixels
