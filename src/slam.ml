@@ -1,6 +1,15 @@
-(* Adapted from BreezySLAM: https://github.com/simondlevy/BreezySLAM *)
+(* Adapted from the CoreSLAM implementation used in BreezySLAM.
+   https://github.com/simondlevy/BreezySLAM
+*)
+open Base
+
 let obstacle = 0
 let no_obstacle = 65500
+
+(* Some default parameters, these could be made customizable. *)
+let map_quality = 50 (* out of 255 *)
+
+let hole_width_mm = 600.
 
 module Position = struct
   type t =
@@ -8,6 +17,11 @@ module Position = struct
     ; y_mm : float
     ; theta_degrees : float
     }
+
+  let x_mm t = t.x_mm
+  let y_mm t = t.y_mm
+  let theta_degrees t = t.theta_degrees
+  let theta_radians t = t.theta_degrees *. Float.pi /. 180.
 end
 
 module Angle_distance = struct
@@ -46,22 +60,131 @@ module Scan = struct
     }
 end
 
-module Map_ = struct
-  type pixels = (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array2.t
+module Map = struct
+  type pixels = (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
   type t =
     { pixels : pixels
     ; size_meters : float
+    ; size_pixels : int
     ; scale_pixels_per_mm : float
     }
 
   let create ~size_pixels ~size_meters =
     let pixels =
-      Bigarray.Array2.create Int16_unsigned C_layout size_pixels size_pixels
+      Bigarray.Array1.create Int16_unsigned C_layout (size_pixels * size_pixels)
     in
-    Bigarray.Array2.fill pixels ((obstacle + no_obstacle) / 2);
+    Bigarray.Array1.fill pixels ((obstacle + no_obstacle) / 2);
     { pixels
     ; size_meters
+    ; size_pixels
     ; scale_pixels_per_mm = Float.of_int size_pixels /. (size_meters *. 1e3)
     }
+
+  let round f = Float.round_down (f +. 0.5) |> Int.of_float
+
+  let clip t ~xyc ~yxc ~xy ~yx =
+    let sz = t.size_pixels in
+    if xyc < 0
+    then if xyc = xy then None else Some (0, yxc + ((yxc - yx) * -xyc / (xyc - xy)))
+    else if xyc >= sz
+    then
+      if xyc = xy
+      then None
+      else Some (sz - 1, yxc + ((yxc - yx) * (sz - 1 - xyc) / (xyc - xy)))
+    else Some (xyc, yxc)
+
+  let laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha =
+    let map_size = t.size_pixels in
+    if 0 <= x1 && x1 < map_size && 0 <= x2 && x2 < map_size
+    then (
+      let x2c, y2c = x2, y2 in
+      match clip t ~xyc:x2c ~yxc:y2c ~xy:x1 ~yx:y1 with
+      | None -> ()
+      | Some (x2c, y2c) ->
+        (match clip t ~xyc:y2c ~yxc:x2c ~xy:y1 ~yx:x1 with
+        | None -> ()
+        | Some (y2c, x2c) ->
+          let dx = Int.abs (x2 - x1) in
+          let dy = Int.abs (y2 - y1) in
+          let dxc = Int.abs (x2c - x1) in
+          let dyc = Int.abs (y2c - y1) in
+          let incptrx = if x2 > x1 then 1 else -1 in
+          let incptry = if y2 > y1 then map_size else -map_size in
+          let sincv = if value > no_obstacle then 1 else -1 in
+          let derrorv, maybe_flip =
+            if dx > dy
+            then Int.abs (xp - x2), fun x y -> x, y
+            else Int.abs (yp - y2), fun x y -> y, x
+          in
+          let dx, _dy = maybe_flip dx dy in
+          let dxc, dyc = maybe_flip dxc dyc in
+          let incptrx, incptry = maybe_flip incptrx incptry in
+          if derrorv = 0
+          then failwith "map_update: no error gradient, try increasing the hole width";
+          let error = ref ((2 * dyc) - dxc) in
+          let horiz = 2 * dyc in
+          let diago = 2 * (dyc - dxc) in
+          let errorv = ref (derrorv / 2) in
+          let incv = (value - no_obstacle) / derrorv in
+          let incerrorv = value - no_obstacle - (derrorv * incv) in
+          let index = ref ((y1 * map_size) + x1) in
+          let pixval = ref no_obstacle in
+          for x = 0 to dxc do
+            if x > dx - (2 * derrorv)
+            then
+              if x <= dx - derrorv
+              then (
+                pixval := !pixval + incv;
+                errorv := !errorv + incerrorv;
+                if !errorv > derrorv
+                then (
+                  pixval := !pixval + sincv;
+                  errorv := !errorv - derrorv))
+              else (
+                pixval := !pixval - incv;
+                errorv := !errorv - incerrorv;
+                if !errorv < 0
+                then (
+                  pixval := !pixval - sincv;
+                  errorv := !errorv + derrorv));
+            let v = (t.pixels.{!index} * (256 - alpha)) + (alpha * !pixval) in
+            t.pixels.{!index} <- v / 256;
+            if !error > 0 then index := !index + incptry;
+            error := !error + if !error > 0 then diago else horiz;
+            index := !index + incptrx
+          done))
+
+  let update t (pos : Position.t) (xyvs : Scan.coordinates_and_value list) =
+    let theta_radians = Position.theta_radians pos in
+    let cos_theta = Float.cos theta_radians in
+    let sin_theta = Float.sin theta_radians in
+    let x1 = round (pos.x_mm *. t.scale_pixels_per_mm) in
+    let y1 = round (pos.y_mm *. t.scale_pixels_per_mm) in
+    List.iter xyvs ~f:(fun { x_mm; y_mm; value } ->
+        let x2p = (cos_theta *. x_mm) -. (sin_theta *. y_mm) in
+        let y2p = (sin_theta *. x_mm) +. (cos_theta *. y_mm) in
+        let xp = round ((pos.x_mm +. x2p) *. t.scale_pixels_per_mm) in
+        let yp = round ((pos.y_mm +. y2p) *. t.scale_pixels_per_mm) in
+        let dist = Float.sqrt ((x2p *. x2p) +. (y2p *. y2p)) in
+        let add = hole_width_mm /. 2. /. dist in
+        let x2p = x2p *. t.scale_pixels_per_mm *. (1. +. add) in
+        let y2p = y2p *. t.scale_pixels_per_mm *. (1. +. add) in
+        let x2 = round ((pos.x_mm *. t.scale_pixels_per_mm) +. x2p) in
+        let y2 = round ((pos.y_mm *. t.scale_pixels_per_mm) +. y2p) in
+        let value, alpha =
+          if value = no_obstacle
+          then no_obstacle, map_quality / 4
+          else obstacle, map_quality
+        in
+        laser_ray t ~x1 ~y1 ~x2 ~y2 ~xp ~yp ~value ~alpha)
 end
+
+type t = { map : Map.t }
+
+let create ~map_size_in_pixels ~map_size_in_meters =
+  let map = Map.create ~size_pixels:map_size_in_pixels ~size_meters:map_size_in_meters in
+  { map }
+
+let current_position _t = failwith "TODO"
+let update _t _distance_angles = failwith "TODO"
