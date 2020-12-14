@@ -47,6 +47,8 @@ module Pixel = struct
     }
 end
 
+let round f = Float.round_down (f +. 0.5) |> Int.of_float
+
 module Map = struct
   type pixels = (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
@@ -67,8 +69,6 @@ module Map = struct
     ; size_pixel
     ; scale_pixels_per_mm = Float.of_int size_pixel /. size_mm
     }
-
-  let round f = Float.round_down (f +. 0.5) |> Int.of_float
 
   let clip t ~xyc ~yxc ~xy ~yx =
     let sz = t.size_pixel in
@@ -204,3 +204,24 @@ let update t ads =
 let map_memory t =
   let genarray = Bigarray.genarray_of_array1 t.map.pixels in
   Bigarray.reshape_2 genarray t.map.size_pixel t.map.size_pixel
+
+(* [obstactle_xys] is in pixels. *)
+let _distance map position obstacle_xys =
+  let theta_radians = Position.theta_radians position in
+  let { Map.size_pixel; scale_pixels_per_mm; pixels; _ } = map in
+  let cos_theta = Float.cos theta_radians in
+  let sin_theta = Float.sin theta_radians in
+  let x_pix = position.x_mm *. scale_pixels_per_mm in
+  let y_pix = position.y_mm *. scale_pixels_per_mm in
+  let n_points = ref 0 in
+  let sum = ref 0 in
+  for i = 0 to Array.length obstacle_xys - 1 do
+    let obstacle_x, obstacle_y = obstacle_xys.(i) in
+    let x = round (x_pix +. (cos_theta *. obstacle_x) -. (sin_theta *. obstacle_y)) in
+    let y = round (y_pix +. (sin_theta *. obstacle_x) +. (cos_theta *. obstacle_y)) in
+    if x >= 0 && x < size_pixel && y >= 0 && y < size_pixel
+    then (
+      Int.incr n_points;
+      sum := !sum + pixels.{(y * size_pixel) + x})
+  done;
+  if !n_points > 0 then Some (Int.to_float !sum /. Int.to_float !n_points) else None

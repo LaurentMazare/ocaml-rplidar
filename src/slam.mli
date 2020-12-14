@@ -43,3 +43,5 @@ val update : t -> Angle_distance.t list -> Pixel.t list
 val map_memory
   :  t
   -> (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array2.t
+
+val _distance : Map.t -> Position.t -> (float * float) array -> float option
