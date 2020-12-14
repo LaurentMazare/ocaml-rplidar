@@ -230,6 +230,23 @@ let max_search_iter = 1000
 let default_sigma_theta_degrees = 20.
 let default_sigma_xy_mm = 100.
 
+module Box_muller = struct
+  let state = ref None
+  let two_pi = Float.pi *. 2.
+
+  let rnd () =
+    match !state with
+    | Some value -> value
+    | None ->
+      let u1 = Random.float 1. in
+      let u2 = Random.float 1. in
+      let s = Float.sqrt (-2. *. Float.log u1) in
+      let x = s *. Float.cos (two_pi *. u2) in
+      let y = s *. Float.sin (two_pi *. u2) in
+      state := Some y;
+      x
+end
+
 (* Random Monte-Carlo Hill Climb optimization. *)
 let rmhc_optimization t ads =
   let obstacle_xys =
@@ -256,8 +273,15 @@ let rmhc_optimization t ads =
     let sigma_theta_degrees = ref default_sigma_theta_degrees in
     let counter = ref 0 in
     while !counter < max_search_iter do
-      let current_position = !last_best_position in
-      (* TODO: random mutation *)
+      let current_position =
+        let { Position.x_mm; y_mm; theta_degrees } = !last_best_position in
+        let x_mm = x_mm +. (Box_muller.rnd () *. !sigma_xy_mm) in
+        let y_mm = y_mm +. (Box_muller.rnd () *. !sigma_xy_mm) in
+        let theta_degrees =
+          theta_degrees +. (Box_muller.rnd () *. !sigma_theta_degrees)
+        in
+        { Position.x_mm; y_mm; theta_degrees }
+      in
       (match distance current_position with
       | Some current_distance when Float.( < ) current_distance !lowest_distance ->
         lowest_distance := current_distance;
