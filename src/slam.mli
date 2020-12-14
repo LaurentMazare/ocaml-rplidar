@@ -44,4 +44,4 @@ val map_memory
   :  t
   -> (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array2.t
 
-val _distance : Map.t -> Position.t -> (float * float) array -> float option
+val rmhc_optimization : t -> Angle_distance.t list -> Position.t

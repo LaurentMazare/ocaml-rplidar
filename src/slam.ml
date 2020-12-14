@@ -206,7 +206,7 @@ let map_memory t =
   Bigarray.reshape_2 genarray t.map.size_pixel t.map.size_pixel
 
 (* [obstactle_xys] is in pixels. *)
-let _distance map position obstacle_xys =
+let distance map position ~obstacle_xys =
   let theta_radians = Position.theta_radians position in
   let { Map.size_pixel; scale_pixels_per_mm; pixels; _ } = map in
   let cos_theta = Float.cos theta_radians in
@@ -225,3 +225,50 @@ let _distance map position obstacle_xys =
       sum := !sum + pixels.{(y * size_pixel) + x})
   done;
   if !n_points > 0 then Some (Int.to_float !sum /. Int.to_float !n_points) else None
+
+let max_search_iter = 1000
+let default_sigma_theta_degrees = 20.
+let default_sigma_xy_mm = 100.
+
+(* Random Monte-Carlo Hill Climb optimization. *)
+let rmhc_optimization t ads =
+  let obstacle_xys =
+    List.filter_map ads ~f:(fun { Angle_distance.angle_degrees; distance_mm } ->
+        let angle_radians = angle_degrees *. Float.pi /. 180. in
+        if Float.( = ) distance_mm 0.
+        then None
+        else (
+          let distance_pix = distance_mm *. t.map.scale_pixels_per_mm in
+          let x = distance_pix *. Float.cos angle_radians in
+          let y = distance_pix *. Float.sin angle_radians in
+          Some (x, y)))
+    |> Array.of_list
+  in
+  let distance pos = distance t.map pos ~obstacle_xys in
+  match distance t.position with
+  | None -> t.position
+  | Some start_distance ->
+    let last_best_position = ref t.position in
+    let last_lowest_distance = ref start_distance in
+    let best_position = ref !last_best_position in
+    let lowest_distance = ref !last_lowest_distance in
+    let sigma_xy_mm = ref default_sigma_xy_mm in
+    let sigma_theta_degrees = ref default_sigma_theta_degrees in
+    let counter = ref 0 in
+    while !counter < max_search_iter do
+      let current_position = !last_best_position in
+      (* TODO: random mutation *)
+      (match distance current_position with
+      | Some current_distance when Float.( < ) current_distance !lowest_distance ->
+        lowest_distance := current_distance;
+        best_position := current_position
+      | Some _ | None -> Int.incr counter);
+      if !counter > max_search_iter / 2
+         && Float.( < ) !lowest_distance !last_lowest_distance
+      then (
+        last_best_position := !best_position;
+        last_lowest_distance := !lowest_distance;
+        sigma_xy_mm := !sigma_xy_mm *. 0.5;
+        sigma_theta_degrees := !sigma_theta_degrees *. 0.5)
+    done;
+    !last_best_position
