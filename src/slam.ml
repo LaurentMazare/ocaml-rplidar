@@ -236,7 +236,9 @@ module Box_muller = struct
 
   let rnd () =
     match !state with
-    | Some value -> value
+    | Some value ->
+      state := None;
+      value
     | None ->
       let u1 = Random.float 1. in
       let u2 = Random.float 1. in
@@ -292,6 +294,7 @@ let rmhc_optimization t ads =
       then (
         last_best_position := !best_position;
         last_lowest_distance := !lowest_distance;
+        counter := 0;
         sigma_xy_mm := !sigma_xy_mm *. 0.5;
         sigma_theta_degrees := !sigma_theta_degrees *. 0.5)
     done;
