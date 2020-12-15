@@ -57,12 +57,13 @@ module Batched_slam : sig
 end = struct
   type t =
     { mutable batch : Slam.Angle_distance.t list
+    ; mutable updates : int
     ; slam : Slam.t
     }
 
   let create () =
     let slam = Slam.create ~map_size_pixel ~map_size_mm in
-    { slam; batch = [] }
+    { slam; batch = []; updates = 0 }
 
   let slam t = t.slam
 
@@ -73,7 +74,12 @@ end = struct
     t.batch <- angle_distance :: t.batch;
     if List.length t.batch > 200
     then (
+      if t.updates > 5
+      then (
+        let pos = Slam.rmhc_optimization t.slam t.batch in
+        Stdio.printf "%f %f %f\n%!" pos.x_mm pos.y_mm pos.theta_degrees);
       let scan_points = Slam.update t.slam t.batch in
+      t.updates <- 1 + t.updates;
       t.batch <- [];
       `update scan_points)
     else `no_update
