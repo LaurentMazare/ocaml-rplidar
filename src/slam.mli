@@ -1,7 +1,11 @@
 open! Base
 
 module Position : sig
-  type t
+  type t =
+    { x_mm : float
+    ; y_mm : float
+    ; theta_degrees : float
+    }
 
   val x_mm : t -> float
   val y_mm : t -> float
