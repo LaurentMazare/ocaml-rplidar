@@ -29,7 +29,7 @@ module G = struct
     ; map_memory = Slam.map_memory slam
     }
 
-  let close _t = Graphics.close_graph ()
+  let _close _t = Graphics.close_graph ()
 
   let update t ~scan_points =
     Graphics.set_color Graphics.white;
@@ -44,7 +44,8 @@ module G = struct
       done
     done;
     Graphics.set_color Graphics.blue;
-    List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } -> Graphics.plot yp xp);
+    List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } ->
+        Graphics.fill_circle yp xp 2);
     Graphics.synchronize ()
 end
 
@@ -76,7 +77,8 @@ end = struct
     then (
       if t.updates > 5
       then (
-        let pos = Slam.rmhc_optimization t.slam t.batch in
+        Slam.rmhc_optimization t.slam t.batch;
+        let pos = Slam.current_position t.slam in
         Stdio.printf "%f %f %f\n%!" pos.x_mm pos.y_mm pos.theta_degrees);
       let scan_points = Slam.update t.slam t.batch in
       t.updates <- 1 + t.updates;
@@ -95,8 +97,8 @@ let replay ~in_channel =
       | `update scan_points -> G.update g ~scan_points)
 
 let run ~out_channel =
-  let slam = Batched_slam.create () in
-  let g = Batched_slam.slam slam |> G.create in
+  (* Only record without actualising a slam model as not being able to process
+     all lidar updates result in incorrect measures.  *)
   let lidar = Lidar.create "/dev/ttyUSB0" in
   Stdio.eprintf "Lidar initialized!\n%!";
   let info = Lidar.Info.get lidar in
@@ -122,7 +124,6 @@ let run ~out_channel =
          Lidar.stop lidar;
          Lidar.close lidar;
          Stdio.Out_channel.flush out_channel;
-         G.close g;
          Caml.exit 1));
   try
     Lidar.Scan.run lidar ~f:(fun { quality; angle; dist } ->
@@ -133,16 +134,12 @@ let run ~out_channel =
           Stdio.Out_channel.fprintf
             out_channel
             "%s\n"
-            (Sample.sexp_of_t sample |> Sexp.to_string_mach);
-          match Batched_slam.process slam sample with
-          | `no_update -> ()
-          | `update scan_points -> G.update g ~scan_points);
+            (Sample.sexp_of_t sample |> Sexp.to_string_mach));
         `continue)
   with
   | exn ->
     Lidar.stop lidar;
     Lidar.close lidar;
-    G.close g;
     raise exn
 
 let () =

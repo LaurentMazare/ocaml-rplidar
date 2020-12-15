@@ -265,7 +265,7 @@ let rmhc_optimization t ads =
   in
   let distance pos = distance t.map pos ~obstacle_xys in
   match distance t.position with
-  | None -> t.position
+  | None -> ()
   | Some start_distance ->
     let last_best_position = ref t.position in
     let last_lowest_distance = ref start_distance in
@@ -298,4 +298,4 @@ let rmhc_optimization t ads =
         sigma_xy_mm := !sigma_xy_mm *. 0.5;
         sigma_theta_degrees := !sigma_theta_degrees *. 0.5)
     done;
-    !last_best_position
+    t.position <- !last_best_position
