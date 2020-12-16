@@ -31,9 +31,20 @@ module G = struct
 
   let _close _t = Graphics.close_graph ()
 
-  let update t ~scan_points ~pos =
+  let update t ~scan_points ~batch ~pos =
+    let scale_pixels_per_mm = Float.of_int map_size_pixel /. map_size_mm in
     Graphics.set_color Graphics.white;
     Graphics.fill_rect 0 0 t.size_x t.size_y;
+    Graphics.set_color Graphics.green;
+    Graphics.fill_circle (map_size_pixel / 2) (map_size_pixel * 3 / 2) 3;
+    Graphics.set_color Graphics.red;
+    List.iter batch ~f:(fun { Slam.Angle_distance.angle_degrees; distance_mm } ->
+        let angle_radians = angle_degrees *. Float.pi /. 180. in
+        let xp = distance_mm *. Float.cos angle_radians *. scale_pixels_per_mm in
+        let yp = distance_mm *. Float.sin angle_radians *. scale_pixels_per_mm in
+        let xp = Float.to_int xp + (map_size_pixel * 3 / 2) in
+        let yp = Float.to_int yp + (map_size_pixel * 1 / 2) in
+        Graphics.fill_circle yp xp 2);
     (* TODO: efficient plotting. *)
     for i = 0 to map_size_pixel - 1 do
       for j = 0 to map_size_pixel - 1 do
@@ -47,8 +58,8 @@ module G = struct
     List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } ->
         Graphics.fill_circle yp xp 2);
     let { Slam.Position.x_mm; y_mm; theta_degrees } = pos in
-    let x_pix = x_mm *. Float.of_int map_size_pixel /. map_size_mm in
-    let y_pix = y_mm *. Float.of_int map_size_pixel /. map_size_mm in
+    let x_pix = x_mm *. scale_pixels_per_mm in
+    let y_pix = y_mm *. scale_pixels_per_mm in
     let theta_radians = theta_degrees *. Float.pi /. 180. in
     let xx_pix = x_pix +. (Float.cos theta_radians *. 20.) in
     let yy_pix = y_pix +. (Float.sin theta_radians *. 20.) in
@@ -67,7 +78,11 @@ module Batched_slam : sig
 
   val create : unit -> t
   val slam : t -> Slam.t
-  val process : t -> Sample.t -> [ `no_update | `update of Slam.Pixel.t list ]
+
+  val process
+    :  t
+    -> Sample.t
+    -> [ `no_update | `update of Slam.Pixel.t list * Slam.Angle_distance.t list ]
 end = struct
   type t =
     { mutable batch : Slam.Angle_distance.t list
@@ -93,10 +108,11 @@ end = struct
         Slam.rmhc_optimization t.slam t.batch;
         let pos = Slam.current_position t.slam in
         Stdio.printf "%f %f %f\n%!" pos.x_mm pos.y_mm pos.theta_degrees);
-      let scan_points = Slam.update t.slam t.batch in
-      t.updates <- 1 + t.updates;
+      let batch = t.batch in
       t.batch <- [];
-      `update scan_points)
+      let scan_points = Slam.update t.slam batch in
+      t.updates <- 1 + t.updates;
+      `update (scan_points, batch))
     else `no_update
 end
 
@@ -107,8 +123,12 @@ let replay ~in_channel =
       let sample = Core_kernel.Sexp.of_string line |> Sample.t_of_sexp in
       match Batched_slam.process slam sample with
       | `no_update -> ()
-      | `update scan_points ->
-        G.update g ~scan_points ~pos:(Batched_slam.slam slam |> Slam.current_position))
+      | `update (scan_points, batch) ->
+        G.update
+          g
+          ~scan_points
+          ~batch
+          ~pos:(Batched_slam.slam slam |> Slam.current_position))
 
 let run ~out_channel =
   (* Only record without actualising a slam model as not being able to process
