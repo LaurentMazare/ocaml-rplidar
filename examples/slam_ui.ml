@@ -2,7 +2,7 @@ open Base
 open Rplidar
 
 let map_size_pixel = 512
-let map_size_mm = 6000.
+let map_size_mm = 10000.
 
 module Sample = struct
   (* TODO: also log the time for the sample? *)
@@ -31,7 +31,7 @@ module G = struct
 
   let _close _t = Graphics.close_graph ()
 
-  let update t ~scan_points =
+  let update t ~scan_points ~pos =
     Graphics.set_color Graphics.white;
     Graphics.fill_rect 0 0 t.size_x t.size_y;
     (* TODO: efficient plotting. *)
@@ -46,6 +46,19 @@ module G = struct
     Graphics.set_color Graphics.blue;
     List.iter scan_points ~f:(fun { Slam.Pixel.xp; yp; _ } ->
         Graphics.fill_circle yp xp 2);
+    let { Slam.Position.x_mm; y_mm; theta_degrees } = pos in
+    let x_pix = x_mm *. Float.of_int map_size_pixel /. map_size_mm in
+    let y_pix = y_mm *. Float.of_int map_size_pixel /. map_size_mm in
+    let theta_radians = theta_degrees *. Float.pi /. 180. in
+    let xx_pix = x_pix +. (Float.cos theta_radians *. 20.) in
+    let yy_pix = y_pix +. (Float.sin theta_radians *. 20.) in
+    let x_pix = Float.to_int x_pix in
+    let y_pix = Float.to_int y_pix in
+    let xx_pix = Float.to_int xx_pix in
+    let yy_pix = Float.to_int yy_pix in
+    Graphics.set_color Graphics.red;
+    Graphics.fill_circle y_pix x_pix 3;
+    Graphics.draw_poly_line [| y_pix, x_pix; yy_pix, xx_pix |];
     Graphics.synchronize ()
 end
 
@@ -94,7 +107,8 @@ let replay ~in_channel =
       let sample = Core_kernel.Sexp.of_string line |> Sample.t_of_sexp in
       match Batched_slam.process slam sample with
       | `no_update -> ()
-      | `update scan_points -> G.update g ~scan_points)
+      | `update scan_points ->
+        G.update g ~scan_points ~pos:(Batched_slam.slam slam |> Slam.current_position))
 
 let run ~out_channel =
   (* Only record without actualising a slam model as not being able to process
